@@ -2,9 +2,9 @@
 
 ## Build
 
-'''
+```
 cmake .
 make
-'''
+```
 
 Have fun!!!
