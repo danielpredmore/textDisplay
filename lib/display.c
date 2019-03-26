@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <ctype.h>
+#include <sys/ioctl.h>
 #include "display.h"
 
 #define CLEAR_STRING "\033[2J"
@@ -9,10 +10,11 @@
 #define TRUE 1
 #define FALSE 0
 
-void windowRender(window_t *window);
-void yankWindow(window_t *window);
-char ** buildStringBlock(unsigned int rows, unsigned int cols);
-color_t ** buildColorBlock(unsigned int rows, unsigned int cols, color_t color);
+static void windowRender(window_t *window);
+static void yankWindow(window_t *window);
+static char ** buildStringBlock(unsigned int rows, unsigned int cols);
+static color_t ** buildColorBlock(unsigned int rows, unsigned int cols, color_t color);
+static void freeDisplayContent(display_t* display);
 
 /**
  * This function builds a new display space.
@@ -50,6 +52,7 @@ display_t *newDisplay(FILE *term,
 	fprintf(display->term, "\033[?25l");
 	fflush(display->term);
 	display->dirty = TRUE;
+	display->auto_size = FALSE;
 	return display;
 }
 
@@ -569,24 +572,7 @@ void freeDisplay(display_t *display)
 		freeWindow(current);
 	}
 
-	int i;
-	for (i = 0; i < display->dim.x; i++)
-	{
-		free(display->current[i]);
-		#ifdef DISPLAY_COLOR
-		free(display->current_color[i]);
-		#endif
-		#ifdef DISPLAY_BACKGROUND
-		free(display->current_background[i]);
-		#endif
-	}
-	free(display->current);
-	#ifdef DISPLAY_COLOR
-	free(display->current_color);
-	#endif
-	#ifdef DISPLAY_BACKGROUND
-	free(display->current_background);
-	#endif
+	freeDisplayContent(display);
 
 	fprintf(display->term, CLEAR_STRING);
 	fprintf(display->term, "\033[1;1H");
@@ -595,7 +581,7 @@ void freeDisplay(display_t *display)
 	free(display);
 }
 
-struct char_struct {
+static struct char_struct {
 	char data;
 	#ifdef DISPLAY_COLOR
 	color_t color;
@@ -605,16 +591,18 @@ struct char_struct {
 	#endif
 };
 
-struct char_struct renderPoint(window_t * window, int x, int y)
+static struct char_struct renderPoint(display_t* display, window_t * window, int x, int y)
 {
 	struct char_struct char_data;
 	char_data.data = ' ';
 	#ifdef DISPLAY_COLOR
-	char_data.color = window->display->default_color;
+	char_data.color = display->default_color;
 	#endif
 	#ifdef DISPLAY_BACKGROUND
-	char_data.background = window->display->default_background;
+	char_data.background = display->default_background;
 	#endif
+
+	if (window == NULL) return char_data;
 
 	window_t *current;
 	for (current = window; current != NULL; current = current->next)
@@ -709,6 +697,58 @@ color_t ** buildColorBlock(unsigned int x, unsigned int y, color_t color)
 	return data;
 }
 
+static void freeDisplayContent(display_t* display)
+{
+	int i;
+	for (i = 0; i < display->dim.x; i++)
+	{
+		free(display->current[i]);
+		#ifdef DISPLAY_COLOR
+		free(display->current_color[i]);
+		#endif
+		#ifdef DISPLAY_BACKGROUND
+		free(display->current_background[i]);
+		#endif
+	}
+	free(display->current);
+	#ifdef DISPLAY_COLOR
+	free(display->current_color);
+	#endif
+	#ifdef DISPLAY_BACKGROUND
+	free(display->current_background);
+	#endif
+}
+
+void displaySetSize(display_t* display, int rows, int cols)
+{
+	if (rows == display->dim.x && cols == display->dim.y)
+		return;
+
+	freeDisplayContent(display);
+
+	display->dim.x = rows;
+	display->dim.y = cols;
+	display->dirty = TRUE;
+
+	display->current = buildStringBlock(rows, cols);
+	#ifdef DISPLAY_COLOR
+	display->current_color = buildColorBlock(rows, cols, display->default_color);
+	#endif
+	#ifdef DISPLAY_BACKGROUND
+	display->current_background = buildColorBlock(rows, cols, display->default_background);
+	#endif
+}
+
+static void checkAndUpdateDisplaySize(display_t* display)
+{
+	if (!display->auto_size) return;
+
+	struct winsize w;
+    ioctl(0, TIOCGWINSZ, &w);
+
+    displaySetSize(display, w.ws_row, w.ws_col);
+}
+
 /**
  * This is the print task for the display.
  * It will only print diffs between the current and next maps.
@@ -718,6 +758,8 @@ color_t ** buildColorBlock(unsigned int x, unsigned int y, color_t color)
  */
 void displayUpdate(display_t* display)
 {
+	checkAndUpdateDisplaySize(display);
+
 	if (display->hidden || !display->dirty)
 	{
 		return;
@@ -740,7 +782,7 @@ void displayUpdate(display_t* display)
 	{
 		for (j = 0; j < display->dim.y; j++)
 		{
-			next = renderPoint(display->bottom_window, i, j);
+			next = renderPoint(display, display->bottom_window, i, j);
 			if (display->current[i][j] != next.data
 				#ifdef DISPLAY_COLOR
 				|| display->current_color[i][j] != next.color
@@ -796,4 +838,9 @@ void displayUpdate(display_t* display)
 	fprintf(display->term, "\033[u");
 	//fprintf(display->term, "\033[?25h");
 	fflush(display->term);
+}
+
+void displaySetAutoSize(display_t* display, char autoSet)
+{
+	display->auto_size = autoSet;
 }

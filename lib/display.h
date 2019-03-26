@@ -69,6 +69,7 @@ struct display_struct
 	struct window_struct *bottom_window;
 	char hidden;
 	char dirty;
+	char auto_size;
 };
 typedef struct display_struct display_t;
 
@@ -153,5 +154,7 @@ void SetTopWindow(window_t *window);
 void freeWindow(window_t *window);
 void freeDisplay(display_t *display);
 void displayUpdate(display_t* display);
+void displaySetAutoSize(display_t* display, char autoSet);
+void displaySetSize(display_t* display, int rows, int cols);
 
 #endif // DISPLAY_H
